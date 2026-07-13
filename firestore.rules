@@ -1,0 +1,30 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    match /uploads/{uploadId} {
+      allow read: if isOwner(resource.data.uid);
+      allow create: if isOwner(request.resource.data.uid)
+        && request.resource.data.keys().hasAll([
+          'uid', 'filename', 'status', 'createdAt'
+        ])
+        && request.resource.data.status == 'pending'
+        && request.resource.data.uid == request.auth.uid;
+      // Clients may only create; status updates come from Cloud Run (Admin SDK).
+      allow update, delete: if false;
+    }
+
+    match /transactions/{transactionId} {
+      allow read: if isOwner(resource.data.uid);
+      // Writes only from Cloud Run Admin SDK.
+      allow create, update, delete: if false;
+    }
+  }
+}

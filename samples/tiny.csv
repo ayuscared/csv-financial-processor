@@ -1,0 +1,22 @@
+date,description,category,amount,type,vendor_customer,invoice_id,payment_method,notes,currency
+2024-05-17,Consulting — 8364,consulting,594.00,revenue,Initech,INV-95405,check,net-30,USD
+2025-05-14,Refund In — 1034,refund_in,2166.67,revenue,Stark Industries,INV-68377,wire,net-30,GBP
+2024-04-14,Payroll — 9870,payroll,116.50,expense,Acme Corp,INV-59965,card,reconciled,USD
+2025-06-24,Refund In — 4818,refund_in,4696.14,revenue,Globex,INV-40260,card,reconciled,USD
+2024-01-23,Travel — 2638,travel,4611.33,expense,Northwind,INV-92490,wire,,USD
+2026-01-08,Travel — 4110,travel,4151.03,expense,Globex,INV-47245,cash,reconciled,GBP
+2025-02-06,Refund In — 7623,refund_in,1217.49,revenue,Initech,INV-97129,card,priority,GBP
+2025-12-20,Payroll — 9330,payroll,2197.61,expense,Acme Corp,INV-31456,cash,reconciled,USD
+2025-05-16,Refund In — 7448,refund_in,222.22,revenue,Stark Industries,INV-32328,card,net-30,USD
+2026-02-28,Subscription — 6633,subscription,2025.25,revenue,Wayne Enterprises,INV-85732,wire,reconciled,USD
+2025-11-06,Refund In — 9396,refund_in,3919.36,revenue,Wayne Enterprises,INV-26940,cash,net-30,EUR
+2024-02-27,Marketing — 4274,marketing,2852.15,expense,Umbrella,INV-64185,check,priority,EUR
+2024-12-20,Consulting — 1458,consulting,2293.44,revenue,Wayne Enterprises,INV-40094,card,net-30,USD
+2026-03-28,Payroll — 2154,payroll,4209.52,expense,Acme Corp,INV-12187,check,,USD
+2024-09-12,Payroll — 4024,payroll,3987.45,expense,Globex,INV-48048,ach,net-30,USD
+2024-09-18,Consulting — 5824,consulting,3242.77,revenue,Initech,INV-52205,check,reconciled,USD
+2024-01-25,Office — 4080,office,1720.00,expense,Globex,INV-24255,wire,net-30,GBP
+2025-03-18,Subscription — 3399,subscription,94.23,revenue,Acme Corp,INV-31001,check,reconciled,GBP
+2026-05-02,Refund In — 1502,refund_in,1119.86,revenue,Initech,INV-98460,cash,priority,EUR
+2024-03-01,Software — 1777,software,4839.68,expense,Globex,INV-19270,ach,priority,USD
+2026-01-31,Refund In — 3136,refund_in,2826.88,revenue,Acme Corp,INV-83494,ach,net-30,GBP
