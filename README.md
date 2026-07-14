@@ -43,6 +43,28 @@ Optional: `vendor_customer`, `invoice_id`, `payment_method`, `notes`, `currency`
 /samples      Sample CSVs (generated sizes are gitignored; tiny.csv kept)
 ```
 
+## Backend architecture (API layering)
+
+```
+HTTP request
+  → routes/          (path binding)
+  → controllers/     (req/res, call services)
+  → services/        (business logic, delegate to repos/validators)
+  → repositories/    (Firestore / Storage I/O)
+```
+
+Composition root: [`backend/src/app.js`](backend/src/app.js)
+
+Endpoints:
+- `GET /health` and `GET /api/v1/health`
+- `POST /` and `POST /api/v1/process` (Eventarc finalize + manual test)
+
+## Frontend architecture
+
+Pages stay thin and call [`frontend/src/api/index.js`](frontend/src/api/index.js), which delegates to services (`upload`, `history`, `dashboard`, `duplicate`).
+
+---
+
 ## Prerequisites
 
 - Node 20+

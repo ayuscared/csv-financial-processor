@@ -9,9 +9,10 @@ import {
   writeBatch,
 } from "firebase/firestore";
 import { deleteObject, ref } from "firebase/storage";
-import { db, storage } from "./firebase.js";
+import { db, storage } from "../lib/firebase.js";
 
 const BATCH_LIMIT = 400;
+const DELETE_CONCURRENCY = 6;
 
 async function deleteTransactionsForUpload(uid, uploadId) {
   let deleted = 0;
@@ -21,19 +22,27 @@ async function deleteTransactionsForUpload(uid, uploadId) {
         collection(db, "transactions"),
         where("uid", "==", uid),
         where("uploadId", "==", uploadId),
-        limit(BATCH_LIMIT)
+        limit(BATCH_LIMIT * DELETE_CONCURRENCY)
       )
     );
     if (snap.empty) break;
 
-    const batch = writeBatch(db);
-    for (const d of snap.docs) {
-      batch.delete(d.ref);
+    const docs = snap.docs;
+    const chunks = [];
+    for (let i = 0; i < docs.length; i += BATCH_LIMIT) {
+      chunks.push(docs.slice(i, i + BATCH_LIMIT));
     }
-    await batch.commit();
-    deleted += snap.docs.length;
 
-    if (snap.docs.length < BATCH_LIMIT) break;
+    await Promise.all(
+      chunks.map(async (chunk) => {
+        const batch = writeBatch(db);
+        for (const d of chunk) batch.delete(d.ref);
+        await batch.commit();
+      })
+    );
+
+    deleted += docs.length;
+    if (docs.length < BATCH_LIMIT * DELETE_CONCURRENCY) break;
   }
   return deleted;
 }
@@ -50,13 +59,9 @@ async function deleteStorageForUpload(uid, uploadId, filename) {
   }
 }
 
-/**
- * Remove one upload: related transactions, Storage object, and upload doc.
- */
+/** Clear one upload and its related transactions / Storage object. */
 export async function clearUploadHistory(user, upload) {
-  if (!user?.uid || !upload?.id) {
-    throw new Error("Missing user or upload");
-  }
+  if (!user?.uid || !upload?.id) throw new Error("Missing user or upload");
   if (upload.uid && upload.uid !== user.uid) {
     throw new Error("Not allowed to delete this upload");
   }
@@ -67,18 +72,16 @@ export async function clearUploadHistory(user, upload) {
   );
   await deleteStorageForUpload(user.uid, upload.id, upload.filename);
   await deleteDoc(doc(db, "uploads", upload.id));
-
   return { uploadId: upload.id, transactionsDeleted };
 }
 
-/**
- * Remove every upload (and their transactions/files) for the signed-in user.
- */
+/** Clear every upload for the signed-in user (delegates per-file). */
 export async function clearAllHistory(user, uploads) {
   if (!user?.uid) throw new Error("Not signed in");
   let uploadsDeleted = 0;
   let transactionsDeleted = 0;
 
+  // Clear sequentially per upload so Storage/rules stay simple; batches inside are parallel.
   for (const upload of uploads) {
     const result = await clearUploadHistory(user, upload);
     uploadsDeleted += 1;

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { validateCsvRecords } from "./validate.js";
+import { validateCsvRecords } from "./validators/csv.validator.js";
 
 test("accepts valid rows", () => {
   const result = validateCsvRecords([

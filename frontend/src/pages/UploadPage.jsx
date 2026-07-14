@@ -1,22 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  addDoc,
-  collection,
-  doc,
-  onSnapshot,
-  query,
-  serverTimestamp,
-  where,
-} from "firebase/firestore";
-import { getDownloadURL, ref, uploadBytesResumable } from "firebase/storage";
 import { useAuth } from "../auth/AuthProvider.jsx";
-import { db, storage } from "../lib/firebase.js";
-import { precheckCsv } from "../lib/csvPrecheck.js";
-import { hashFile } from "../lib/fileHash.js";
 import {
-  findDuplicateUpload,
-  formatDuplicateError,
-} from "../lib/uploadTracker.js";
+  countTrackedUploads,
+  submitCsvUpload,
+  watchUploadDoc,
+  watchUserUploads,
+} from "../api/index.js";
 
 export default function UploadPage() {
   const { user } = useAuth();
@@ -31,20 +20,17 @@ export default function UploadPage() {
 
   useEffect(() => {
     if (!user) return undefined;
-    const q = query(collection(db, "uploads"), where("uid", "==", user.uid));
-    return onSnapshot(q, (snap) => {
-      setPriorUploads(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-    });
+    return watchUserUploads(user.uid, setPriorUploads);
   }, [user]);
 
   useEffect(() => {
     if (!uploadId) return undefined;
-    return onSnapshot(doc(db, "uploads", uploadId), (snap) => {
-      if (snap.exists()) setUploadDoc({ id: snap.id, ...snap.data() });
-    });
+    return watchUploadDoc(uploadId, setUploadDoc);
   }, [uploadId]);
 
   const status = uploadDoc?.status || (busy ? "pending" : null);
+  const trackedCount = countTrackedUploads(priorUploads);
+  const errors = useMemo(() => uploadDoc?.errors || [], [uploadDoc]);
 
   async function onUpload(event) {
     event.preventDefault();
@@ -55,77 +41,26 @@ export default function UploadPage() {
     setUploadDoc(null);
     setUploadId(null);
     setUploadProgress(0);
-
-    const check = await precheckCsv(file);
-    if (!check.ok) {
-      setPrecheckError(check.message);
-      return;
-    }
-
     setBusy(true);
+
     try {
-      const contentHash = await hashFile(file);
-      const duplicate = findDuplicateUpload(priorUploads, {
-        filename: file.name,
-        contentHash,
+      const { uploadId: id } = await submitCsvUpload({
+        user,
+        file,
+        priorUploads,
+        onProgress: setUploadProgress,
       });
-      if (duplicate) {
-        setError(formatDuplicateError(duplicate));
-        return;
-      }
-
-      const uploadRef = await addDoc(collection(db, "uploads"), {
-        uid: user.uid,
-        filename: file.name,
-        contentHash,
-        byteSize: file.size,
-        status: "pending",
-        errors: [],
-        rowCount: 0,
-        createdAt: serverTimestamp(),
-        processedAt: null,
-      });
-
-      setUploadId(uploadRef.id);
-
-      const objectPath = `uploads/${user.uid}/${uploadRef.id}_${file.name}`;
-      const storageRef = ref(storage, objectPath);
-      const task = uploadBytesResumable(storageRef, file, {
-        contentType: file.type || "text/csv",
-        customMetadata: {
-          uploadId: uploadRef.id,
-          uid: user.uid,
-          originalFilename: file.name,
-          contentHash,
-        },
-      });
-
-      await new Promise((resolve, reject) => {
-        task.on(
-          "state_changed",
-          (snapshot) => {
-            const pct =
-              (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-            setUploadProgress(Math.round(pct));
-          },
-          reject,
-          resolve
-        );
-      });
-
-      await getDownloadURL(storageRef);
+      setUploadId(id);
     } catch (err) {
-      setError(err.message || "Upload failed");
+      if (err.code === "precheck") {
+        setPrecheckError(err.message);
+      } else {
+        setError(err.message || "Upload failed");
+      }
     } finally {
       setBusy(false);
     }
   }
-
-  const errors = useMemo(() => uploadDoc?.errors || [], [uploadDoc]);
-
-  const trackedCount = priorUploads.filter((u) =>
-    ["success", "pending", "processing"].includes(u.status)
-  ).length;
 
   return (
     <div>

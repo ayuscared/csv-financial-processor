@@ -1,12 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  collection,
-  onSnapshot,
-  orderBy,
-  query,
-  where,
-} from "firebase/firestore";
-import {
   Bar,
   BarChart,
   CartesianGrid,
@@ -18,11 +11,12 @@ import {
 } from "recharts";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider.jsx";
-import { db } from "../lib/firebase.js";
 import {
   clearAllHistory,
   clearUploadHistory,
-} from "../lib/historyClear.js";
+  computeDashboardSummaryFromUploads,
+  watchUploadsNewestFirst,
+} from "../api/index.js";
 
 function formatMoney(value) {
   return new Intl.NumberFormat("en-US", {
@@ -50,7 +44,6 @@ function formatPct(value) {
 
 export default function DashboardPage() {
   const { user } = useAuth();
-  const [rows, setRows] = useState([]);
   const [uploads, setUploads] = useState([]);
   const [loading, setLoading] = useState(true);
   const [clearingId, setClearingId] = useState(null);
@@ -60,112 +53,20 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!user) return undefined;
-    const txQ = query(
-      collection(db, "transactions"),
-      where("uid", "==", user.uid)
-    );
-    const uploadsQ = query(
-      collection(db, "uploads"),
-      where("uid", "==", user.uid),
-      orderBy("createdAt", "desc")
-    );
-
-    let txReady = false;
-    let uploadsReady = false;
-    const maybeDone = () => {
-      if (txReady && uploadsReady) setLoading(false);
-    };
-
-    const unsubTx = onSnapshot(
-      txQ,
-      (snap) => {
-        setRows(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-        txReady = true;
-        maybeDone();
+    return watchUploadsNewestFirst(
+      user.uid,
+      (data) => {
+        setUploads(data);
+        setLoading(false);
       },
-      () => {
-        txReady = true;
-        maybeDone();
-      }
+      () => setLoading(false)
     );
-
-    const unsubUploads = onSnapshot(
-      uploadsQ,
-      (snap) => {
-        setUploads(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-        uploadsReady = true;
-        maybeDone();
-      },
-      () => {
-        uploadsReady = true;
-        maybeDone();
-      }
-    );
-
-    return () => {
-      unsubTx();
-      unsubUploads();
-    };
   }, [user]);
 
-  const summary = useMemo(() => {
-    let revenue = 0;
-    let expenses = 0;
-    let revenueCount = 0;
-    let expenseCount = 0;
-    const byMonth = new Map();
-    const categoryTotals = new Map();
-
-    for (const row of rows) {
-      const amount = Number(row.amount) || 0;
-      const month = row.month || "unknown";
-      if (!byMonth.has(month)) {
-        byMonth.set(month, { month, revenue: 0, expenses: 0 });
-      }
-      const bucket = byMonth.get(month);
-
-      if (row.type === "revenue") {
-        revenue += amount;
-        revenueCount += 1;
-        bucket.revenue += amount;
-      } else if (row.type === "expense") {
-        expenses += amount;
-        expenseCount += 1;
-        bucket.expenses += amount;
-      }
-
-      const cat = row.category || "uncategorized";
-      categoryTotals.set(cat, (categoryTotals.get(cat) || 0) + amount);
-    }
-
-    const monthChart = [...byMonth.values()].sort((a, b) =>
-      a.month.localeCompare(b.month)
-    );
-
-    const topCategories = [...categoryTotals.entries()]
-      .map(([category, total]) => ({ category, total }))
-      .sort((a, b) => b.total - a.total)
-      .slice(0, 6);
-
-    const profit = revenue - expenses;
-    const margin = revenue > 0 ? (profit / revenue) * 100 : NaN;
-
-    return {
-      revenue,
-      expenses,
-      profit,
-      margin,
-      transactionCount: rows.length,
-      revenueCount,
-      expenseCount,
-      avgRevenue: revenueCount ? revenue / revenueCount : 0,
-      avgExpense: expenseCount ? expenses / expenseCount : 0,
-      monthChart,
-      topCategories,
-      successfulUploads: uploads.filter((u) => u.status === "success").length,
-      failedUploads: uploads.filter((u) => u.status === "failed").length,
-    };
-  }, [rows, uploads]);
+  const summary = useMemo(
+    () => computeDashboardSummaryFromUploads(uploads),
+    [uploads]
+  );
 
   const busy = clearingAll || Boolean(clearingId);
 
@@ -222,6 +123,13 @@ export default function DashboardPage() {
       </p>
 
       {loading ? <p className="muted">Loading…</p> : null}
+      {summary.missingSummaries > 0 ? (
+        <p className="muted">
+          {summary.missingSummaries} older successful upload
+          {summary.missingSummaries === 1 ? "" : "s"} lack a stored summary.
+          Delete and re-upload those files to restore full metrics.
+        </p>
+      ) : null}
 
       <div className="metrics metrics-wide" style={{ marginTop: "1.25rem" }}>
         <div className="panel metric">
@@ -328,8 +236,7 @@ export default function DashboardPage() {
               {summary.failedUploads
                 ? `, ${summary.failedUploads} failed`
                 : ""}
-              ). Deleting a file also removes its transactions from the
-              dashboard.
+              ). Deleting a file also removes its transactions.
             </p>
           </div>
           <button

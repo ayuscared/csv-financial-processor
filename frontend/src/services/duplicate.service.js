@@ -1,10 +1,8 @@
+/**
+ * Duplicate checks — pure helpers used by the upload service.
+ */
 const ACTIVE_STATUSES = new Set(["pending", "processing", "success"]);
 
-/**
- * Find a prior upload that should block a re-upload.
- * Blocks matching filename or content hash when the prior upload is
- * pending, processing, or success (failed uploads may be retried).
- */
 export function findDuplicateUpload(uploads, { filename, contentHash }) {
   const name = (filename || "").trim().toLowerCase();
   const hash = (contentHash || "").toLowerCase();
@@ -35,4 +33,8 @@ export function formatDuplicateError(duplicate) {
     ? upload.createdAt.toDate().toLocaleString()
     : "earlier";
   return `This file was already uploaded (${via}): “${upload.filename}” on ${when} [${upload.status}].`;
+}
+
+export function countTrackedUploads(uploads) {
+  return uploads.filter((u) => ACTIVE_STATUSES.has(u.status)).length;
 }
