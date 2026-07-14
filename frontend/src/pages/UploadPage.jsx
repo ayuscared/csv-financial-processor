@@ -4,12 +4,19 @@ import {
   collection,
   doc,
   onSnapshot,
+  query,
   serverTimestamp,
+  where,
 } from "firebase/firestore";
 import { getDownloadURL, ref, uploadBytesResumable } from "firebase/storage";
 import { useAuth } from "../auth/AuthProvider.jsx";
 import { db, storage } from "../lib/firebase.js";
 import { precheckCsv } from "../lib/csvPrecheck.js";
+import { hashFile } from "../lib/fileHash.js";
+import {
+  findDuplicateUpload,
+  formatDuplicateError,
+} from "../lib/uploadTracker.js";
 
 export default function UploadPage() {
   const { user } = useAuth();
@@ -20,6 +27,15 @@ export default function UploadPage() {
   const [uploadId, setUploadId] = useState(null);
   const [uploadDoc, setUploadDoc] = useState(null);
   const [error, setError] = useState("");
+  const [priorUploads, setPriorUploads] = useState([]);
+
+  useEffect(() => {
+    if (!user) return undefined;
+    const q = query(collection(db, "uploads"), where("uid", "==", user.uid));
+    return onSnapshot(q, (snap) => {
+      setPriorUploads(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    });
+  }, [user]);
 
   useEffect(() => {
     if (!uploadId) return undefined;
@@ -48,9 +64,21 @@ export default function UploadPage() {
 
     setBusy(true);
     try {
+      const contentHash = await hashFile(file);
+      const duplicate = findDuplicateUpload(priorUploads, {
+        filename: file.name,
+        contentHash,
+      });
+      if (duplicate) {
+        setError(formatDuplicateError(duplicate));
+        return;
+      }
+
       const uploadRef = await addDoc(collection(db, "uploads"), {
         uid: user.uid,
         filename: file.name,
+        contentHash,
+        byteSize: file.size,
         status: "pending",
         errors: [],
         rowCount: 0,
@@ -68,6 +96,7 @@ export default function UploadPage() {
           uploadId: uploadRef.id,
           uid: user.uid,
           originalFilename: file.name,
+          contentHash,
         },
       });
 
@@ -84,7 +113,6 @@ export default function UploadPage() {
         );
       });
 
-      // Touch download URL to ensure object is fully finalized for some clients
       await getDownloadURL(storageRef);
     } catch (err) {
       setError(err.message || "Upload failed");
@@ -95,12 +123,19 @@ export default function UploadPage() {
 
   const errors = useMemo(() => uploadDoc?.errors || [], [uploadDoc]);
 
+  const trackedCount = priorUploads.filter((u) =>
+    ["success", "pending", "processing"].includes(u.status)
+  ).length;
+
   return (
     <div>
       <h1>Upload CSV</h1>
       <p className="muted">
-        Select a transactions file. A quick header check runs in the browser;
-        full validation happens on the server after upload.
+        Select a transactions file. Duplicate filenames or identical file
+        contents are blocked. Full validation runs on the server after upload.
+      </p>
+      <p className="muted">
+        Tracked uploads for your account: <strong>{trackedCount}</strong>
       </p>
 
       <form className="panel form" onSubmit={onUpload} style={{ marginTop: "1.25rem" }}>
@@ -109,7 +144,11 @@ export default function UploadPage() {
           <input
             type="file"
             accept=".csv,text/csv"
-            onChange={(e) => setFile(e.target.files?.[0] || null)}
+            onChange={(e) => {
+              setFile(e.target.files?.[0] || null);
+              setError("");
+              setPrecheckError("");
+            }}
           />
         </label>
         {precheckError ? <div className="error">{precheckError}</div> : null}

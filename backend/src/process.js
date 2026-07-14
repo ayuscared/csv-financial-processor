@@ -1,8 +1,34 @@
+import { createHash } from "node:crypto";
 import { parse } from "csv-parse/sync";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { validateCsvRecords } from "./validate.js";
 
 const BATCH_LIMIT = 400;
+const ACTIVE_STATUSES = new Set(["pending", "processing", "success"]);
+
+function sha256Hex(buffer) {
+  return createHash("sha256").update(buffer).digest("hex");
+}
+
+async function findServerDuplicate(db, { uid, uploadId, filename, contentHash }) {
+  const snap = await db.collection("uploads").where("uid", "==", uid).get();
+  const name = (filename || "").trim().toLowerCase();
+  const hash = (contentHash || "").toLowerCase();
+
+  for (const doc of snap.docs) {
+    if (doc.id === uploadId) continue;
+    const data = doc.data();
+    if (!ACTIVE_STATUSES.has(data.status)) continue;
+    const sameName =
+      name && (data.filename || "").trim().toLowerCase() === name;
+    const sameHash =
+      hash && (data.contentHash || "").toLowerCase() === hash;
+    if (sameName || sameHash) {
+      return { id: doc.id, ...data, sameName, sameHash };
+    }
+  }
+  return null;
+}
 
 function parseObjectPath(objectName) {
   // Expected: uploads/{uid}/{uploadId}_{filename}.csv
@@ -77,6 +103,44 @@ export async function processStorageObject({ db, bucket, objectName, metadata = 
 
   try {
     const [buffer] = await bucket.file(objectName).download();
+    const contentHash = sha256Hex(buffer);
+    const filename = upload.filename || parsed.originalFilename;
+
+    const duplicate = await findServerDuplicate(db, {
+      uid,
+      uploadId,
+      filename,
+      contentHash,
+    });
+    if (duplicate) {
+      const via = [
+        duplicate.sameName ? "filename" : null,
+        duplicate.sameHash ? "file contents" : null,
+      ]
+        .filter(Boolean)
+        .join(" and ");
+      await uploadRef.update({
+        status: "failed",
+        contentHash,
+        byteSize: buffer.length,
+        errors: [
+          {
+            row: 0,
+            column: "file",
+            error: `Duplicate upload blocked (${via}): already tracked as “${duplicate.filename}” [${duplicate.status}]`,
+          },
+        ],
+        rowCount: 0,
+        processedAt: FieldValue.serverTimestamp(),
+      });
+      return { ok: false, reason: "duplicate" };
+    }
+
+    await uploadRef.update({
+      contentHash,
+      byteSize: buffer.length,
+    });
+
     const text = buffer.toString("utf8");
     let records;
     try {

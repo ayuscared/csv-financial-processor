@@ -13,18 +13,23 @@ service cloud.firestore {
       allow read: if isOwner(resource.data.uid);
       allow create: if isOwner(request.resource.data.uid)
         && request.resource.data.keys().hasAll([
-          'uid', 'filename', 'status', 'createdAt'
+          'uid', 'filename', 'status', 'createdAt', 'contentHash', 'byteSize'
         ])
         && request.resource.data.status == 'pending'
-        && request.resource.data.uid == request.auth.uid;
-      // Clients may only create; status updates come from Cloud Run (Admin SDK).
-      allow update, delete: if false;
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.contentHash is string
+        && request.resource.data.contentHash.size() == 64
+        && request.resource.data.byteSize is int
+        && request.resource.data.byteSize > 0;
+      // Status updates come from Cloud Run; clients may delete their own history.
+      allow update: if false;
+      allow delete: if isOwner(resource.data.uid);
     }
 
     match /transactions/{transactionId} {
       allow read: if isOwner(resource.data.uid);
-      // Writes only from Cloud Run Admin SDK.
-      allow create, update, delete: if false;
+      allow create, update: if false;
+      allow delete: if isOwner(resource.data.uid);
     }
   }
 }
